@@ -1,0 +1,115 @@
+# ========================================
+# DOCKER COMPOSE - LOCAL DEVELOPMENT
+# ========================================
+
+version: '3.8'
+
+services:
+  # SQL Server Database
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: supply-chain-sqlserver
+    environment:
+      SA_PASSWORD: "DevPassword123!"
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Express"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    networks:
+      - supply-chain-network
+    healthcheck:
+      test: /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "DevPassword123!" -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: supply-chain-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --requirepass redispassword123
+    networks:
+      - supply-chain-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: supply-chain-api
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 8080
+      SQL_SERVER: sqlserver
+      SQL_DATABASE: SupplyChainDB
+      SQL_USER: sa
+      SQL_PASSWORD: "DevPassword123!"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redispassword123
+      JWT_SECRET: your_super_secret_jwt_key_change_this
+      APPINSIGHTS_CONNECTION_STRING: ""
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    networks:
+      - supply-chain-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend (optional - run separately with npm start)
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   container_name: supply-chain-dashboard
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     REACT_APP_API_URL: http://localhost:8080/api
+  #   depends_on:
+  #     - backend
+  #   networks:
+  #     - supply-chain-network
+
+  # Optional: PgAdmin for database management
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   container_name: supply-chain-pgadmin
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@example.com
+  #     PGADMIN_DEFAULT_PASSWORD: admin
+  #   ports:
+  #     - "5050:80"
+  #   networks:
+  #     - supply-chain-network
+
+networks:
+  supply-chain-network:
+    driver: bridge
+
+volumes:
+  sqlserver_data:
+  redis_data:
